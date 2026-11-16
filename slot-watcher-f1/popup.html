@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* 800 x 300 popup (Chrome's max width is 800). Four columns (status + schedule, limits, actions, log), each scrolls on its own. */
+    html { height: 300px; overflow: hidden; }
+    body { font: 13px system-ui, sans-serif; width: 800px; height: 300px; margin: 0; box-sizing: border-box;
+           display: grid; grid-template-columns: 165px 165px 220px 1fr; gap: 14px; padding: 12px; overflow: hidden; }
+    .col { min-height: 0; overflow-y: auto; }
+    .col + .col { border-left: 1px solid #e4e4e7; padding-left: 14px; }
+    .col-log { display: flex; flex-direction: column; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    h2 { font-size: 12px; margin: 0 0 6px; color: #71717a; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+    .row { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0; }
+    .warn { color: #b45309; font-weight: 600; }
+    .countdown { font-size: 18px; font-variant-numeric: tabular-nums; }
+    .muted { color: #71717a; font-size: 12px; }
+    #cityList, #repeatCityList { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-bottom: 8px; }
+    #cityList label, #repeatCityList label { display: flex; align-items: center; gap: 4px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .actions button { flex: 1 1 calc(50% - 6px); }
+    .book { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+    .book button { flex: 1; min-width: 0; padding: 2px 0; font-weight: 600; }
+    #bookStatus { margin-top: 2px; }
+    pre { flex: 1; min-height: 0; margin: 0; background: #f4f4f5; padding: 6px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+    /* First two columns (general info) at 0.7x the normal font sizes: 13->9.1, 15->10.5, 12->8.4, 18->12.6. */
+    .col-info { font-size: 9.1px; }
+    .col-info h1 { font-size: 10.5px; }
+    .col-info h2, .col-info .muted { font-size: 8.4px; }
+    .col-info .countdown { font-size: 12.6px; }
+    .col-info input { font-size: inherit; }
+    /* Third column (cities + actions) at 0.8x: 13->10.4, 12->9.6. Buttons and dropdowns don't inherit font size by default. */
+    .col-actions { font-size: 10.4px; }
+    .col-actions h2 { font-size: 9.6px; }
+    .col-actions button, .col-actions select { font-size: inherit; }
+    /* Smaller checkboxes, no built-in margin, label text right next to them. */
+    input[type="checkbox"] { width: 11px; height: 11px; margin: 0; flex: none; }
+    #cityList, #repeatCityList { gap: 2px 8px; margin-bottom: 4px; }
+    #cityList label, #repeatCityList label { gap: 3px; }
+    .col-info label.row { justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+    .col-info label.row + .muted { margin: 0 0 4px; }
+  </style>
+</head>
+<body>
+  <div class="col col-info">
+    <h1>Visa Slot Watcher (F1)</h1>
+    <div id="test" class="warn"></div>
+    <div class="row"><span>Status</span><b id="status"></b></div>
+    <div class="row"><span>Requests today</span><b id="count"></b></div>
+    <div class="row"><span>Next auto-check in</span><b id="countdown" class="countdown">-</b></div>
+    <div class="row"><span id="next" class="muted"></span></div>
+    <div class="row" title="Scheduled checks run at these minutes past every hour, whether or not the boxes below are ticked (the multiples of 5 in windowMinutes in config.js)."><span>Always check at</span></div>
+    <div id="mainTimes" class="muted"></div>
+    <label class="row" title="Scheduled checks always run at :15 :25 :55. Ticked: also at the times listed in [ ] below (every 5 minutes) on top. Each run checks the ticked cities, so more times means more calendar requests - and likely more Cloudflare checks. Changing it reschedules the next check right away."><span>Also check at the following times</span><input type="checkbox" id="extraWindows"></label>
+    <div id="extraTimes" class="muted"></div>
+    <label class="row" title="Range of seconds after each scheduled minute (0-600). Each check starts at a uniformly random time in this range, picked fresh every time, e.g. 5 to 20 -> anywhere from 10:25:05 to 10:25:20; 30 to 90 -> 10:25:30 to 10:26:30. Same number in both boxes = fixed delay. Changing it reschedules the next check right away. Default comes from startDelaySeconds in config.js."><span>Start delay after the minute</span><span><input type="number" id="startDelayMin" min="0" max="600" step="1" style="width:46px"> to <input type="number" id="startDelayMax" min="0" max="600" step="1" style="width:46px"> s</span></label>
+    <div id="startDelayErr" class="warn"></div>
+    <label class="row" title="Ticked: after each scheduled check starts, check the ticked cities again every N seconds for the next M minutes (e.g. 30 s for 5 min = 10 more checks). Every follow-up is a full check, so this multiplies calendar requests and raises the chance of Cloudflare checks / rate limits. Follow-ups stop early on a pause, Turn off or a booking. Default comes from repeatChecks in config.js."><span>Keep re-checking after each one</span><input type="checkbox" id="repeatOn"></label>
+    <div class="row"><span>every</span><span><input type="number" id="repeatEvery" min="5" max="3600" step="1" style="width:46px"> s, for <input type="number" id="repeatFor" min="1" max="120" step="1" style="width:46px"> min</span></div>
+    <div id="repeatErr" class="warn"></div>
+    <div class="muted" title="Cities the follow-up checks go through, in the numbered order. Separate from 'Cities to check' below, which only applies to Check now and the regular scheduled checks.">Follow-up cities</div>
+    <div id="repeatCityList" class="cityGrid"></div>
+  </div>
+
+  <div class="col col-info">
+    <h2>Session &amp; limits</h2>
+    <div class="row" title="The portal logs you out after ~15 min without activity. If no calendar has loaded by then, the extension checks the keep-alive city (books if it can). Any calendar load restarts this timer."><span>Keep-alive in</span><b id="keepAlive">-</b></div>
+    <div class="row" title="Full loads of the schedule page today (yours and the extension's). The portal allows about 20 a day, then shows 'You have exceeded the limit for viewing this page' for 24 h. City checks don't count - only loading the page."><span>Schedule page loads today</span><b id="pageViews">-</b></div>
+    <div id="pageLock" class="warn"></div>
+    <div class="row" title="The status tab (portal home page, in the background) is reloaded before each check to catch a sign-out or Cloudflare check there instead of on the schedule page. Last result and when."><span>Status tab</span><b id="statusCheck">-</b></div>
+    <label class="row" title="Ticked: no limit on calendar requests per day - only the portal's own 429 / Cloudflare / page-view-limit responses pause checks. Unticked: stop at the daily cap (dailyCap in config.js). Your choice is remembered."><span>Ignore daily cap</span><input type="checkbox" id="capOff"></label>
+    <div id="capWarn" class="warn"></div>
+    <label class="row" title="Consular page only: book a consular date only if it is at most this many weeks after your OFC date, so the two appointments aren't far apart. Applies to scheduled checks, Check now, Book now and keep-alive. It also ends OFC dates this many weeks before each window's end. Off = anywhere in the window. Default from consularMaxWeeksAfterOfc in config.js."><span>Consular within</span><select id="consularWeeks"></select></label>
+    <label class="row" title="Your booked OFC appointment date. Filled in automatically when the extension books the OFC; type it here if you booked it yourself. While this is empty, consular slots are never booked - you get a pop-up instead."><span>OFC date</span><input type="date" id="ofcDate"></label>
+    <div id="consularNote" class="muted"></div>
+    <h2 style="margin-top:10px" title="Both appointments must fall inside one window (dateWindows in config.js). OFC: each window minus the consular limit at the end. Consular: OFC date to OFC + the limit, inside the window. Applies to every check, Book now too.">Date ranges</h2>
+    <div id="ranges" class="muted"></div>
+    <h2 style="margin-top:10px">Skipped dates</h2>
+    <div id="skipDates" class="muted"></div>
+  </div>
+
+  <div class="col col-actions">
+    <h2 title="Cities that Check now AND the scheduled :15/:25/:55 checks go through, always in the numbered order (cities in config.js). Unticking cities also means fewer calendar requests per run. Keep-alive and Book now use their own city.">Cities to check (Check now + scheduled)</h2>
+    <div id="cityList"></div>
+    <h2>Actions</h2>
+    <div class="actions">
+      <button id="checkNow" title="Checks the ticked cities right away, one after another, and autobooks the first open slot it can (clicks Submit). The dropdown stays on the last city checked. Uses 1 calendar request per city.">Check now</button>
+      <button id="stop" title="Stops the check that is running now (Check now, scheduled or Book now) and drops any waiting in line. The city dropdown is left as it is, so you can pick a city by hand. A Submit already sent to the portal cannot be undone.">Stop</button>
+      <button id="toggle"></button>
+      <button id="clear" title="Lifts a rate-limit or Cloudflare pause and the 'booked' stop, so checks can run again right away.">Clear pause / booked</button>
+      <button id="login" title="Fills your username and password from .env into the open sign-in page and clicks Submit. If the page has a captcha, it fills the rest and leaves the captcha for you.">Log in</button>
+      <button id="answer" title="Reads the security questions on the open page, types the matching answers from .env and clicks Submit. If any question isn't in .env it types nothing.">Answer questions</button>
+      <button id="capture" title="Saves the page's structure to Downloads/slot-watcher/page-snapshot.json - the sign-in page if this popup is open over it, otherwise the schedule page. Never includes what you typed. Makes no requests to the portal.">Capture page</button>
+      <button id="testBat" title="Runs slot-watcher-f1\test.bat now, the same way it runs when the Cloudflare window opens. Makes no requests to the portal. Needs native\install.bat run once.">Test .bat</button>
+      <button id="testSignIn" title="Reloads the status tab now. If it shows the sign-in form: Log in and Answer questions there (the schedule tab is left alone, no page load), then one keep-alive check in the schedule tab to prove it still works (1 calendar request, may book). Cloudflare checkbox: opens the recovery window. Signed in already: nothing else happens.">Test sign-in</button>
+    </div>
+    <div class="book" title="Book now: one click books the earliest available date inside the date ranges and first time at that city - clicks Submit. If it can't, tries the other cities. Uses 1 calendar request per city.">
+      <span>Book now</span>
+    </div>
+    <div id="bookStatus" class="muted"></div>
+  </div>
+
+  <div class="col col-log">
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

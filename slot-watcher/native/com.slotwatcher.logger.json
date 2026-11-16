@@ -1,0 +1,7 @@
+{
+  "name": "com.slotwatcher.logger",
+  "description": "Visa Slot Watcher log file helper",
+  "path": "C:\\Users\\tck07\\OneDrive\\Documents\\GitHub\\visa\\slot-watcher\\native\\logger.bat",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://kpbhmophiokjficdmhpglimhejfaaoki/"]
+}

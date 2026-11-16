@@ -1,0 +1,12 @@
+# secrets / credentials
+.env
+**/.env
+
+# runtime data that may contain personal info
+logs/
+test-logs/
+screenshots/
+url.txt
+sch_appt_page-snapshot.json
+reddit_post.pdf
+*.docx

@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* 800 x 300 popup (Chrome's max width is 800). Four columns (status + schedule, limits, actions, log), each scrolls on its own. */
+    html { height: 300px; overflow: hidden; }
+    body { font: 13px system-ui, sans-serif; width: 800px; height: 300px; margin: 0; box-sizing: border-box;
+           display: grid; grid-template-columns: 165px 165px 220px 1fr; gap: 14px; padding: 12px; overflow: hidden; }
+    .col { min-height: 0; overflow-y: auto; }
+    .col + .col { border-left: 1px solid #e4e4e7; padding-left: 14px; }
+    .col-log { display: flex; flex-direction: column; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    h2 { font-size: 12px; margin: 0 0 6px; color: #71717a; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+    .row { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0; }
+    .warn { color: #b45309; font-weight: 600; }
+    .countdown { font-size: 18px; font-variant-numeric: tabular-nums; }
+    .muted { color: #71717a; font-size: 12px; }
+    #cityList { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-bottom: 8px; }
+    #cityList label { display: flex; align-items: center; gap: 4px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .actions button { flex: 1 1 calc(50% - 6px); }
+    .book { display: flex; gap: 6px; margin-top: 8px; }
+    .book select { flex: 1; min-width: 0; }
+    pre { flex: 1; min-height: 0; margin: 0; background: #f4f4f5; padding: 6px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+    /* First two columns (general info) at 0.7x the normal font sizes: 13->9.1, 15->10.5, 12->8.4, 18->12.6. */
+    .col-info { font-size: 9.1px; }
+    .col-info h1 { font-size: 10.5px; }
+    .col-info h2, .col-info .muted { font-size: 8.4px; }
+    .col-info .countdown { font-size: 12.6px; }
+    .col-info input { font-size: inherit; }
+    /* Smaller checkboxes, no built-in margin, label text right next to them. */
+    input[type="checkbox"] { width: 11px; height: 11px; margin: 0; flex: none; }
+    #cityList { gap: 2px 8px; margin-bottom: 4px; }
+    #cityList label { gap: 3px; }
+    .col-info label.row { justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+    .col-info label.row + .muted { margin: 0 0 4px; }
+  </style>
+</head>
+<body>
+  <div class="col col-info">
+    <h1>Visa Slot Watcher</h1>
+    <div id="test" class="warn"></div>
+    <div class="row"><span>Status</span><b id="status"></b></div>
+    <div class="row"><span>Requests today</span><b id="count"></b></div>
+    <div class="row"><span>Next auto-check in</span><b id="countdown" class="countdown">-</b></div>
+    <div class="row"><span id="next" class="muted"></span></div>
+    <div class="row" title="Scheduled checks run at these minutes past every hour, whether or not the boxes below are ticked (the multiples of 5 in windowMinutes in config.js)."><span>Always check at</span></div>
+    <div id="mainTimes" class="muted"></div>
+    <label class="row" title="Ticked: also check at the main times that aren't a multiple of 5 (listed in [ ] below - busiest minutes from the slot analysis, in your time). Unticked: skip them. More times means more calendar requests - and likely more Cloudflare checks. Changing it reschedules the next check right away."><span>Also check at off-5 minutes</span><input type="checkbox" id="offGridWindows"></label>
+    <div id="offGridTimes" class="muted"></div>
+    <label class="row" title="Scheduled checks always run at :25 :55 (plus the off-5 minutes above if ticked). Ticked: also at the times listed in [ ] below (every 5 minutes) on top. Each run checks the ticked cities, so more times means more calendar requests - and likely more Cloudflare checks. Changing it reschedules the next check right away."><span>Also check at the following times</span><input type="checkbox" id="extraWindows"></label>
+    <div id="extraTimes" class="muted"></div>
+    <label class="row" title="Range of seconds after each scheduled minute (0-600). Each check starts at a uniformly random time in this range, picked fresh every time, e.g. 5 to 20 -> anywhere from 10:25:05 to 10:25:20; 30 to 90 -> 10:25:30 to 10:26:30. Same number in both boxes = fixed delay. Changing it reschedules the next check right away. Default comes from startDelaySeconds in config.js."><span>Start delay after the minute</span><span><input type="number" id="startDelayMin" min="0" max="600" step="1" style="width:46px"> to <input type="number" id="startDelayMax" min="0" max="600" step="1" style="width:46px"> s</span></label>
+    <div id="startDelayErr" class="warn"></div>
+  </div>
+
+  <div class="col col-info">
+    <h2>Session &amp; limits</h2>
+    <div class="row" title="The portal logs you out after ~15 min without activity. If no calendar has loaded by then, the extension checks the keep-alive city (books if it can), then returns the dropdown to blank. Any calendar load restarts this timer."><span>Keep-alive in</span><b id="keepAlive">-</b></div>
+    <label class="row" title="Ticked: no limit on calendar requests per day - only the portal's own 429 / Cloudflare / page-view-limit responses pause checks. Unticked: stop at the daily cap (dailyCap in config.js). Your choice is remembered."><span>Ignore daily cap</span><input type="checkbox" id="capOff"></label>
+    <div id="capWarn" class="warn"></div>
+    <label class="row" title="Consular page only: book a consular date only if it is at most this many weeks after your OFC date, so the two appointments aren't far apart. Applies to scheduled checks, Check now, Book now, WhatsApp and keep-alive. Off = any date. Default from consularMaxWeeksAfterOfc in config.js."><span>Consular within</span><select id="consularWeeks"></select></label>
+    <label class="row" title="Your booked OFC appointment date. Filled in automatically when the extension books the OFC; type it here if you booked it yourself."><span>OFC date</span><input type="date" id="ofcDate"></label>
+    <div id="consularNote" class="muted"></div>
+    <h2 style="margin-top:10px">Skipped dates</h2>
+    <div id="skipDates" class="muted"></div>
+  </div>
+
+  <div class="col">
+    <h2 title="Cities that Check now AND the scheduled :25/:55 checks go through, always in config order (Hyderabad, Chennai, Kolkata, Mumbai, New Delhi). Unticking cities also means fewer calendar requests per run. WhatsApp alerts, keep-alive and Book now use their own city.">Cities to check (Check now + scheduled)</h2>
+    <div id="cityList"></div>
+    <h2>Actions</h2>
+    <div class="actions">
+      <button id="checkNow" title="Checks the ticked cities right away, one after another, and autobooks the first open slot it can (clicks Submit). If no city has dates, the city dropdown goes back to blank. Uses 1 calendar request per city.">Check now</button>
+      <button id="stop" title="Stops the check that is running now (Check now, scheduled, WhatsApp-triggered or Book now) and drops any waiting in line. The city dropdown is left as it is, so you can pick a city by hand. A Submit already sent to the portal cannot be undone.">Stop</button>
+      <button id="toggle"></button>
+      <button id="clear" title="Lifts a rate-limit or Cloudflare pause and the 'booked' stop, so checks can run again right away.">Clear pause / booked</button>
+      <button id="waTest" title="Reads the last 8 messages in the open WhatsApp group and logs what each would trigger. Dry run - no checks are made.">Test WhatsApp</button>
+      <button id="capture" title="Saves the schedule page's structure to Downloads/slot-watcher/page-snapshot.json. Makes no requests to the portal.">Capture page</button>
+    </div>
+    <div class="book">
+      <select id="rehearseCity" title="City for Book now"></select>
+      <button id="rehearse" title="Books the earliest available date and first time at the chosen city, ignoring the date range - clicks Submit. If it can't, tries the other cities. Uses 1 calendar request per city.">Book now (any date)</button>
+    </div>
+  </div>
+
+  <div class="col col-log">
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
